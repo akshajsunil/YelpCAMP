@@ -26,4 +26,21 @@ Have your C# extractor add a property: {"Confidence": "High"} for direct maps, a
 In Kùzu, you store this on the edge: [:TRANSFORMED_BY {confidence: "High"}]. This allows you to write graph queries later that say, "Show me the lineage, but flag any paths where the confidence drops so I know where to manually verify."
 4. Trigger Parsing Regex (Step 4)
 Parsing triggers via regex for INSERT INTO ... SELECT is going to be the most brittle part of this new code. Since you're just looking for source-to-target column mappings, focus your regex capture groups strictly on the SELECT list and the INSERT INTO (col1, col2) list, bypassing the complex JOIN logic in the trigger body.
-Since you already have the infrastructure running, which of these new modules do you want to attack first: upgrading your C# SsisMetadataExtractor to spit out the column-level FQNs, or building the new Python Query Store execution-plan parser?
+Since you already have the infrastructure running, which of these new modules do you want to attack first: upgrading your C# SsisMetadataExtractor to spit out the column-level FQNs, or buildin
+
+
+
+
+
+1. Confidence as an Enum (High / Medium / Low)
+Verdict: Absolutely go with the Enum. Do not use free-text. When you are traversing a graph of this size, you want to be able to write OpenCypher queries that explicitly filter on trust levels.
+If you use strict values:
+High: Native SSIS LineageID maps.
+Medium: Execution Plan derived (highly accurate, but subject to cache availability).
+Low: Regex on triggers, dynamic SQL, or SSIS Script Components.
+This allows you to easily write a query later that says: "Find the lineage for this app column, but highlight any path where the confidence drops below 'High' so a human can manually review that specific hop."
+2. Column Node Creation Strategy
+Verdict: Pre-seed from your existing columns.json snapshots.
+You should pre-seed the nodes before running the edge ingestion. Here is why:
+Discovering Dead Ends: If you only create nodes "on-demand" when an edge is found, your graph will only show columns involved in ETLs. Pre-seeding the entire schema allows you to query for orphaned columns—columns that exist in your 300+ databases but have zero incoming or outgoing ETL connections. That is incredibly valuable for identifying dead data or manual-entry fields.
+Data Integrity: If your edge parser accidentally grabs a badly formatted FQN due to a weird regex edge case, an "on-demand" strategy would just create a junk node. If you pre-seed, Kùzu will throw an error when the edge tries to connect to a non-existent node, catching parser bugs early
